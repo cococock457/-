@@ -1,0 +1,45 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Arrange files
+        run: |
+          if [ ! -f app/build.gradle.kts ]; then
+            D=app/src/main/java/ua/trevogaalarm
+            mkdir -p "$D"
+            for f in AlarmReceiver AlertListener BootReceiver MainActivity Notif RingService Scheduler Store; do
+              if [ -f "$f.kt" ]; then mv "$f.kt" "$D/"; fi
+            done
+            if [ -f AndroidManifest.xml ]; then mv AndroidManifest.xml app/src/main/; fi
+            i=0
+            for f in build.gradle*.kts; do
+              mv "$f" "tmp$i.kts"
+              i=$((i+1))
+            done
+            for f in tmp*.kts; do
+              if grep -q "apply false" "$f"; then
+                mv "$f" build.gradle.kts
+              else
+                mv "$f" app/build.gradle.kts
+              fi
+            done
+          fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Build debug APK
+        run: gradle assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
