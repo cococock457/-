@@ -1,0 +1,137 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Arrange files
+        run: |
+          ls -la
+          python3 - <<'PY'
+          import os, re, shutil, subprocess
+          def ct(f):
+              r = subprocess.run(["git", "log", "-1", "--format=%ct", "--", f], capture_output=True, text=True).stdout.strip()
+              return int(r or 0)
+          def read(f):
+              return open(f, encoding="utf-8", errors="ignore").read()
+          def put(src, dst):
+              data = read(src)
+              os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+              with open(dst, "w", encoding="utf-8") as o:
+                  o.write(data)
+          def pick(c):
+              c = sorted(c, key=lambda f: (ct(f), f))
+              return c[-1] if c else None
+          files = [f for f in os.listdir(".") if os.path.isfile(f)]
+          D = "app/src/main/java/ua/trevogaalarm"
+          for n in ["AlarmReceiver", "AlarmWidget", "AlertListener", "BootReceiver", "MainActivity", "Notif", "Poller", "RingService", "Scheduler", "Store"]:
+              c = [f for f in files if f.lower().endswith(".kt") and n.lower() in f.lower() and re.search(r"(class|object)\s+" + n + r"\b", read(f))]
+              b = pick(c)
+              if not b:
+                  raise SystemExit("ERROR: missing or empty file for " + n)
+              print(n, "<-", b)
+              put(b, D + "/" + n + ".kt")
+          m = pick([f for f in files if f.endswith(".xml") and "<manifest" in read(f)])
+          if not m:
+              raise SystemExit("ERROR: missing AndroidManifest.xml")
+          put(m, "app/src/main/AndroidManifest.xml")
+          ic = pick([f for f in files if f.lower().endswith(".png") and "ic_launcher" in f.lower()])
+          if not ic:
+              raise SystemExit("ERROR: upload ic_launcher.png to the repository")
+          os.makedirs("app/src/main/res/mipmap-xxxhdpi", exist_ok=True)
+          shutil.copy(ic, "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png")
+          R = "app/src/main/res/"
+          def res(path, text):
+              os.makedirs(os.path.dirname(R + path), exist_ok=True)
+              with open(R + path, "w", encoding="utf-8") as o:
+                  o.write(text.strip() + "\n")
+          NS = 'xmlns:android="http://schemas.android.com/apk/res/android"'
+          res("layout/widget_alarm.xml", """
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout %s
+              android:id="@+id/w_root"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="horizontal"
+              android:gravity="center_vertical"
+              android:padding="12dp"
+              android:background="@drawable/widget_bg_ok">
+              <TextView
+                  android:id="@+id/w_icon"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:textSize="30sp"
+                  android:text="✅" />
+              <LinearLayout
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_weight="1"
+                  android:orientation="vertical"
+                  android:paddingStart="10dp">
+                  <TextView
+                      android:id="@+id/w_title"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:textColor="#FFFFFF"
+                      android:text="Тривоги немає" />
+                  <TextView
+                      android:id="@+id/w_sub"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:textSize="12sp"
+                      android:textColor="#E6FFFFFF"
+                      android:text="" />
+              </LinearLayout>
+          </LinearLayout>
+          """.replace("%s", NS))
+          for name, color in [("ok", "#2FB980"), ("alert", "#E5484D")]:
+              res("drawable/widget_bg_" + name + ".xml", """
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape %s android:shape="rectangle">
+              <solid android:color="%c" />
+              <corners android:radius="22dp" />
+          </shape>
+          """.replace("%s", NS).replace("%c", color))
+          res("xml/widget_alarm_info.xml", """
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider %s
+              android:minWidth="180dp"
+              android:minHeight="60dp"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_alarm"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen" />
+          """.replace("%s", NS))
+          k = [f for f in files if f.endswith(".kts")]
+          for cond, dst in [("apply false", "build.gradle.kts.tmp"), ("namespace", "app/build.gradle.kts"), ("rootProject.name", "settings.gradle.kts.tmp")]:
+              s = pick([f for f in k if cond in read(f)])
+              if not s:
+                  raise SystemExit("ERROR: missing gradle file with " + cond)
+              print(cond, "<-", s)
+              put(s, dst)
+          os.replace("build.gradle.kts.tmp", "build.gradle.kts")
+          os.replace("settings.gradle.kts.tmp", "settings.gradle.kts")
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Build debug APK
+        run: gradle assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+          
