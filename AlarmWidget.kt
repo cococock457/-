@@ -7,57 +7,60 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
-import java.util.Calendar
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-/** Віджет головного екрана: стан тривоги і найближчий будильник. */
 class AlarmWidget : AppWidgetProvider() {
 
-    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        val rv = build(context)
-        for (id in appWidgetIds) appWidgetManager.updateAppWidget(id, rv)
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray
+    ) {
+        val views = build(context)
+        for (id in appWidgetIds) appWidgetManager.updateAppWidget(id, views)
     }
 
     companion object {
-        fun updateAll(c: Context) {
-            try {
-                val mgr = AppWidgetManager.getInstance(c)
-                val ids = mgr.getAppWidgetIds(ComponentName(c, AlarmWidget::class.java))
-                if (ids.isEmpty()) return
-                val rv = build(c)
-                for (id in ids) mgr.updateAppWidget(id, rv)
-            } catch (e: Exception) {
-            }
+
+        /** Викликати після будь-якої зміни стану тривоги (Alerts.set вже це робить). */
+        fun updateAll(context: Context) {
+            val ctx = context.applicationContext
+            val mgr = AppWidgetManager.getInstance(ctx)
+            val ids = mgr.getAppWidgetIds(ComponentName(ctx, AlarmWidget::class.java))
+            if (ids.isEmpty()) return
+            val views = build(ctx)
+            for (id in ids) mgr.updateAppWidget(id, views)
         }
 
-        private fun p2(n: Int) = if (n < 10) "0$n" else n.toString()
+        private fun build(context: Context): RemoteViews {
+            val alert = try { Store.alert(context) } catch (e: Exception) { false }
+            val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 
-        private fun build(c: Context): RemoteViews {
-            val alert = Store.alert(c)
-            val rv = RemoteViews(c.packageName, R.layout.widget_alarm)
-            rv.setTextViewText(R.id.w_icon, if (alert) "🚨" else "✅")
-            rv.setTextViewText(R.id.w_title, if (alert) "Повітряна тривога" else "Тривоги немає")
+            val v = RemoteViews(context.packageName, R.layout.widget_alarm)
 
-            val t = Scheduler.nextAt(c)
-            val sub = if (t == null) {
-                "Будильник вимкнено"
+            if (alert) {
+                v.setInt(R.id.widget_root, "setBackgroundResource", R.drawable.widget_bg_alert)
+                v.setTextViewText(R.id.widget_icon, "\uD83D\uDEA8")
+                v.setTextViewText(R.id.widget_title, "Тривога!")
+                v.setTextViewText(R.id.widget_sub, "Будильник чекає відбою · $time")
             } else {
-                val cal = Calendar.getInstance()
-                cal.timeInMillis = t
-                "⏰ " + p2(cal.get(Calendar.HOUR_OF_DAY)) + ":" + p2(cal.get(Calendar.MINUTE)) +
-                    (if (Store.pending(c)) " · чекає відбою" else "")
+                v.setInt(R.id.widget_root, "setBackgroundResource", R.drawable.widget_bg_ok)
+                v.setTextViewText(R.id.widget_icon, "\u2705")
+                v.setTextViewText(R.id.widget_title, "Тривоги немає")
+                v.setTextViewText(R.id.widget_sub, "Оновлено $time")
             }
-            rv.setTextViewText(R.id.w_sub, sub)
-            rv.setInt(
-                R.id.w_root, "setBackgroundResource",
-                if (alert) R.drawable.widget_bg_alert else R.drawable.widget_bg_ok
-            )
 
-            val open = PendingIntent.getActivity(
-                c, 7, Intent(c, MainActivity::class.java),
+            val open = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pi = PendingIntent.getActivity(
+                context, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            rv.setOnClickPendingIntent(R.id.w_root, open)
-            return rv
+            v.setOnClickPendingIntent(R.id.widget_root, pi)
+            return v
         }
     }
 }
