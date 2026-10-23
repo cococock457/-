@@ -10,86 +10,219 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Arrange files
         run: |
-          ls -la
-          python3 - <<'PY'
-          import os, re, subprocess
-
-          def ct(f):
-              r = subprocess.run(["git", "log", "-1", "--format=%ct", "--", f], capture_output=True, text=True).stdout.strip()
-              return int(r or 0)
-
-          def read(f):
-              return open(f, encoding="utf-8", errors="ignore").read()
-
-          def put(src, dst):
-              data = read(src)
-              os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
-              with open(dst, "w", encoding="utf-8") as o:
-                  o.write(data)
-
-          def pick(c):
-              c = sorted(c, key=lambda f: (ct(f), f))
-              return c[-1] if c else None
-
-          def norm(f):
-              m = re.match(r"^(.*?)(?:-\d+)+(\.[A-Za-z0-9]+)$", f)
-              return m.group(1) + m.group(2) if m else f
-
-          files = [f for f in os.listdir(".") if os.path.isfile(f) and not f.startswith("v2_")]
-          groups = {}
-          for f in files:
-              groups.setdefault(norm(f), []).append(f)
-
-          D = "app/src/main/java/ua/trevogaalarm"
-          R = "app/src/main/res"
-
-          kt = {n: pick(c) for n, c in groups.items() if n.endswith(".kt")}
-          if "MainActivity.kt" not in kt:
-              raise SystemExit("ERROR: MainActivity.kt not found")
-          for n, src in kt.items():
-              print("kt", n, "<-", src)
-              put(src, D + "/" + n)
-
-          if "AndroidManifest.xml" not in groups:
-              raise SystemExit("ERROR: AndroidManifest.xml not found")
-          src = pick(groups["AndroidManifest.xml"])
-          print("manifest <-", src)
-          put(src, "app/src/main/AndroidManifest.xml")
-
-          res = {
-              "widget_alarm.xml": "layout",
-              "widget_bg_ok.xml": "drawable",
-              "widget_bg_alert.xml": "drawable",
-              "widget_alarm_info.xml": "xml",
+          set -e
+          D=app/src/main/java/ua/trevogaalarm
+          R=app/src/main/res
+          mkdir -p $D $R/layout $R/drawable $R/xml $R/mipmap-xxxhdpi
+          for n in AlarmReceiver AlarmWidget AlertListener BootReceiver MainActivity Notif Poller RingService Scheduler Store; do
+            if [ ! -f "$n.kt" ]; then echo "ERROR: upload $n.kt to the repository root"; exit 1; fi
+            cp "$n.kt" "$D/$n.kt"
+          done
+          if [ ! -f ic_launcher.png ]; then echo "ERROR: ic_launcher.png not found"; exit 1; fi
+          cp ic_launcher.png $R/mipmap-xxxhdpi/ic_launcher.png
+          mkdir -p .
+          cat > build.gradle.kts <<'EOF_0'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
           }
-          for n, d in res.items():
-              if n not in groups:
-                  raise SystemExit("ERROR: " + n + " not found")
-              src = pick(groups[n])
-              print("res", n, "<-", src)
-              put(src, R + "/" + d + "/" + n)
+          EOF_0
+          mkdir -p .
+          cat > settings.gradle.kts <<'EOF_1'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "TrevogaAlarm"
+          include(":app")
+          EOF_1
+          mkdir -p .
+          cat > gradle.properties <<'EOF_2'
+          org.gradle.jvmargs=-Xmx2048m
+          android.nonTransitiveRClass=true
+          EOF_2
+          mkdir -p app
+          cat > app/build.gradle.kts <<'EOF_3'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
 
-          k = [f for f in files if f.endswith(".kts")]
-          for cond, dst in [("apply false", "build.gradle.kts.tmp"), ("namespace", "app/build.gradle.kts"), ("rootProject.name", "settings.gradle.kts.tmp")]:
-              s = pick([f for f in k if cond in read(f)])
-              if not s:
-                  raise SystemExit("ERROR: missing gradle file with " + cond)
-              print(cond, "<-", s)
-              put(s, dst)
-          os.replace("build.gradle.kts.tmp", "build.gradle.kts")
-          os.replace("settings.gradle.kts.tmp", "settings.gradle.kts")
+          android {
+              namespace = "ua.trevogaalarm"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "ua.trevogaalarm"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          EOF_3
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'EOF_4'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-          if not os.path.exists("ic_launcher.png"):
-              raise SystemExit("ERROR: ic_launcher.png not found")
-          os.makedirs(R + "/mipmap-xxxhdpi", exist_ok=True)
-          with open("ic_launcher.png", "rb") as a, open(R + "/mipmap-xxxhdpi/ic_launcher.png", "wb") as b:
-              b.write(a.read())
-          PY
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+
+              <application
+                  android:allowBackup="false"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="Тривога-будильник"
+                  android:theme="@android:style/Theme.Material.Light">
+
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <receiver android:name=".AlarmReceiver" android:exported="false" />
+
+                  <receiver android:name=".BootReceiver" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+                  </receiver>
+
+                  <receiver android:name=".PollReceiver" android:exported="false" />
+
+                  <receiver android:name=".AlarmWidget" android:exported="false">
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.appwidget.provider"
+                          android:resource="@xml/widget_alarm_info" />
+                  </receiver>
+
+                  <service
+                      android:name=".RingService"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
+
+                  <service
+                      android:name=".AlertListener"
+                      android:exported="true"
+                      android:label="Тривога-будильник"
+                      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.service.notification.NotificationListenerService" />
+                      </intent-filter>
+                  </service>
+              </application>
+          </manifest>
+          EOF_4
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/widget_bg_ok.xml <<'EOF_5'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <gradient
+                  android:angle="315"
+                  android:startColor="#4FD1B5"
+                  android:endColor="#2B8FA8" />
+              <corners android:radius="24dp" />
+          </shape>
+          EOF_5
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/widget_bg_alert.xml <<'EOF_6'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <gradient
+                  android:angle="315"
+                  android:startColor="#F25C54"
+                  android:endColor="#9B1C31" />
+              <corners android:radius="24dp" />
+          </shape>
+          EOF_6
+          mkdir -p app/src/main/res/layout
+          cat > app/src/main/res/layout/widget_alarm.xml <<'EOF_7'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/w_root"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="horizontal"
+              android:gravity="center_vertical"
+              android:padding="16dp"
+              android:background="@drawable/widget_bg_ok">
+
+              <TextView
+                  android:id="@+id/w_icon"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:textSize="34sp"
+                  android:text="✅" />
+
+              <LinearLayout
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_weight="1"
+                  android:orientation="vertical"
+                  android:paddingStart="14dp">
+
+                  <TextView
+                      android:id="@+id/w_title"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:textSize="18sp"
+                      android:textStyle="bold"
+                      android:textColor="#FFFFFF"
+                      android:maxLines="1"
+                      android:text="Тривоги немає" />
+
+                  <TextView
+                      android:id="@+id/w_sub"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="2dp"
+                      android:textSize="13sp"
+                      android:textColor="#E6FFFFFF"
+                      android:maxLines="1"
+                      android:text="" />
+              </LinearLayout>
+          </LinearLayout>
+          EOF_7
+          mkdir -p app/src/main/res/xml
+          cat > app/src/main/res/xml/widget_alarm_info.xml <<'EOF_8'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="250dp"
+              android:minHeight="70dp"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_alarm"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen" />
+          EOF_8
+          find app -type f | sort
 
       - uses: actions/setup-java@v4
         with:
