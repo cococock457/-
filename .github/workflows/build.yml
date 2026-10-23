@@ -38,18 +38,14 @@ jobs:
 
           files = [f for f in os.listdir(".") if os.path.isfile(f)]
           D = "app/src/main/java/ua/trevogaalarm"
-          for n in ["AlarmReceiver", "AlertListener", "BootReceiver", "MainActivity", "Notif", "RingService", "Scheduler", "Store", "Widget"]:
-              c = [f for f in files if f.lower().endswith(".kt") and n.lower() in f.lower() and re.search(r"(class|object)\s+" + n + r"\b", read(f))]
-              b = pick(c)
-              if not b:
-                  raise SystemExit("ERROR: missing or empty file for " + n)
-              print(n, "<-", b)
-              put(b, D + "/" + n + ".kt")
 
-          m = pick([f for f in files if f.endswith(".xml") and "<manifest" in read(f)])
-          if not m:
-              raise SystemExit("ERROR: missing AndroidManifest.xml")
-          put(m, "app/src/main/AndroidManifest.xml")
+          if not os.path.exists("v2_App.kt"):
+              raise SystemExit("ERROR: v2_App.kt not found")
+          put("v2_App.kt", D + "/App.kt")
+
+          if not os.path.exists("v2_AndroidManifest.xml"):
+              raise SystemExit("ERROR: v2_AndroidManifest.xml not found")
+          put("v2_AndroidManifest.xml", "app/src/main/AndroidManifest.xml")
 
           k = [f for f in files if f.endswith(".kts")]
           for cond, dst in [("apply false", "build.gradle.kts.tmp"), ("namespace", "app/build.gradle.kts"), ("rootProject.name", "settings.gradle.kts.tmp")]:
@@ -122,3 +118,4 @@ jobs:
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          
