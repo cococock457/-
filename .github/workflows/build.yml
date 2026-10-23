@@ -36,16 +36,43 @@ jobs:
               c = sorted(c, key=lambda f: (ct(f), f))
               return c[-1] if c else None
 
-          files = [f for f in os.listdir(".") if os.path.isfile(f)]
+          def norm(f):
+              m = re.match(r"^(.*?)(?:-\d+)+(\.[A-Za-z0-9]+)$", f)
+              return m.group(1) + m.group(2) if m else f
+
+          files = [f for f in os.listdir(".") if os.path.isfile(f) and not f.startswith("v2_")]
+          groups = {}
+          for f in files:
+              groups.setdefault(norm(f), []).append(f)
+
           D = "app/src/main/java/ua/trevogaalarm"
+          R = "app/src/main/res"
 
-          if not os.path.exists("v2_App.kt"):
-              raise SystemExit("ERROR: v2_App.kt not found")
-          put("v2_App.kt", D + "/App.kt")
+          kt = {n: pick(c) for n, c in groups.items() if n.endswith(".kt")}
+          if "MainActivity.kt" not in kt:
+              raise SystemExit("ERROR: MainActivity.kt not found")
+          for n, src in kt.items():
+              print("kt", n, "<-", src)
+              put(src, D + "/" + n)
 
-          if not os.path.exists("v2_AndroidManifest.xml"):
-              raise SystemExit("ERROR: v2_AndroidManifest.xml not found")
-          put("v2_AndroidManifest.xml", "app/src/main/AndroidManifest.xml")
+          if "AndroidManifest.xml" not in groups:
+              raise SystemExit("ERROR: AndroidManifest.xml not found")
+          src = pick(groups["AndroidManifest.xml"])
+          print("manifest <-", src)
+          put(src, "app/src/main/AndroidManifest.xml")
+
+          res = {
+              "widget_alarm.xml": "layout",
+              "widget_bg_ok.xml": "drawable",
+              "widget_bg_alert.xml": "drawable",
+              "widget_alarm_info.xml": "xml",
+          }
+          for n, d in res.items():
+              if n not in groups:
+                  raise SystemExit("ERROR: " + n + " not found")
+              src = pick(groups[n])
+              print("res", n, "<-", src)
+              put(src, R + "/" + d + "/" + n)
 
           k = [f for f in files if f.endswith(".kts")]
           for cond, dst in [("apply false", "build.gradle.kts.tmp"), ("namespace", "app/build.gradle.kts"), ("rootProject.name", "settings.gradle.kts.tmp")]:
@@ -56,74 +83,13 @@ jobs:
               put(s, dst)
           os.replace("build.gradle.kts.tmp", "build.gradle.kts")
           os.replace("settings.gradle.kts.tmp", "settings.gradle.kts")
+
+          if not os.path.exists("ic_launcher.png"):
+              raise SystemExit("ERROR: ic_launcher.png not found")
+          os.makedirs(R + "/mipmap-xxxhdpi", exist_ok=True)
+          with open("ic_launcher.png", "rb") as a, open(R + "/mipmap-xxxhdpi/ic_launcher.png", "wb") as b:
+              b.write(a.read())
           PY
-
-      - name: Secrets stub (без API-ключа)
-        run: |
-          printf 'package ua.trevogaalarm\n\nobject Secrets {\n    const val ALERTS_KEY = ""\n}\n' > app/src/main/java/ua/trevogaalarm/Secrets.kt
-
-      - name: App icon
-        run: |
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          cp ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-
-      - name: Widget resources
-        run: |
-          mkdir -p app/src/main/res/layout app/src/main/res/xml app/src/main/res/drawable
-          cat > app/src/main/res/drawable/widget_bg.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"
-              android:shape="rectangle">
-              <gradient
-                  android:angle="315"
-                  android:startColor="#2B3A67"
-                  android:endColor="#10172A" />
-              <corners android:radius="24dp" />
-              <stroke android:width="1dp" android:color="#33FFFFFF" />
-          </shape>
-          EOF
-          cat > app/src/main/res/layout/widget.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:id="@+id/w_root"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:background="@drawable/widget_bg"
-              android:padding="16dp"
-              android:gravity="center_vertical"
-              android:orientation="vertical">
-              <TextView
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="ТРИВОГА-БУДИЛЬНИК"
-                  android:textColor="#99FFFFFF"
-                  android:textSize="11sp"
-                  android:textStyle="bold"
-                  android:letterSpacing="0.1"
-                  android:maxLines="1" />
-              <TextView
-                  android:id="@+id/w_text"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:layout_marginTop="6dp"
-                  android:textColor="#FFFFFF"
-                  android:textSize="17sp"
-                  android:textStyle="bold"
-                  android:lineSpacingExtra="4dp"
-                  android:maxLines="3"
-                  android:text="Тривога-будильник" />
-          </LinearLayout>
-          EOF
-          cat > app/src/main/res/xml/widget_info.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-              android:minWidth="250dp"
-              android:minHeight="90dp"
-              android:updatePeriodMillis="1800000"
-              android:initialLayout="@layout/widget"
-              android:resizeMode="horizontal|vertical"
-              android:widgetCategory="home_screen" />
-          EOF
 
       - uses: actions/setup-java@v4
         with:
