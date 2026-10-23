@@ -1,0 +1,17 @@
+<!-- Встав ВСЕРЕДИНУ <application> ... </application> в AndroidManifest.xml -->
+
+<receiver
+    android:name=".AlarmWidget"
+    android:exported="false">
+    <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+    </intent-filter>
+    <meta-data
+        android:name="android.appwidget.provider"
+        android:resource="@xml/widget_alarm_info" />
+</receiver>
+
+<!-- Якщо PollReceiver ще НЕ прописаний у манифесті — додай і його -->
+<receiver
+    android:name=".PollReceiver"
+    android:exported="false" />
