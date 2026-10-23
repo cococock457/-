@@ -58,12 +58,9 @@ jobs:
           os.replace("settings.gradle.kts.tmp", "settings.gradle.kts")
           PY
 
-      - name: Inject API key
-        env:
-          ALERTS_API_KEY: ${{ secrets.ALERTS_API_KEY }}
+      - name: Secrets stub (без API-ключа)
         run: |
-          if [ -z "$ALERTS_API_KEY" ]; then echo "WARNING: secret ALERTS_API_KEY is empty, API check disabled"; fi
-          printf 'package ua.trevogaalarm\n\nobject Secrets {\n    const val ALERTS_KEY = "%s"\n}\n' "$ALERTS_API_KEY" > app/src/main/java/ua/trevogaalarm/Secrets.kt
+          printf 'package ua.trevogaalarm\n\nobject Secrets {\n    const val ALERTS_KEY = ""\n}\n' > app/src/main/java/ua/trevogaalarm/Secrets.kt
 
       - name: App icon
         run: |
@@ -72,30 +69,56 @@ jobs:
 
       - name: Widget resources
         run: |
-          mkdir -p app/src/main/res/layout app/src/main/res/xml
+          mkdir -p app/src/main/res/layout app/src/main/res/xml app/src/main/res/drawable
+          cat > app/src/main/res/drawable/widget_bg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <gradient
+                  android:angle="315"
+                  android:startColor="#2B3A67"
+                  android:endColor="#10172A" />
+              <corners android:radius="24dp" />
+              <stroke android:width="1dp" android:color="#33FFFFFF" />
+          </shape>
+          EOF
           cat > app/src/main/res/layout/widget.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:id="@+id/w_root"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
-              android:background="#E6222222"
-              android:padding="12dp"
+              android:background="@drawable/widget_bg"
+              android:padding="16dp"
+              android:gravity="center_vertical"
               android:orientation="vertical">
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="ТРИВОГА-БУДИЛЬНИК"
+                  android:textColor="#99FFFFFF"
+                  android:textSize="11sp"
+                  android:textStyle="bold"
+                  android:letterSpacing="0.1"
+                  android:maxLines="1" />
               <TextView
                   android:id="@+id/w_text"
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
+                  android:layout_marginTop="6dp"
                   android:textColor="#FFFFFF"
-                  android:textSize="15sp"
+                  android:textSize="17sp"
+                  android:textStyle="bold"
+                  android:lineSpacingExtra="4dp"
+                  android:maxLines="3"
                   android:text="Тривога-будильник" />
           </LinearLayout>
           EOF
           cat > app/src/main/res/xml/widget_info.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-              android:minWidth="180dp"
-              android:minHeight="70dp"
+              android:minWidth="250dp"
+              android:minHeight="90dp"
               android:updatePeriodMillis="1800000"
               android:initialLayout="@layout/widget"
               android:resizeMode="horizontal|vertical"
