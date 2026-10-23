@@ -3,8 +3,11 @@ package ua.trevogaalarm
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -21,8 +24,22 @@ object Alerts {
         return words
     }
 
+    /** Слова громади, які користувач ввів вручну (список громад завеликий для меню). */
     fun districtWords(c: Context): List<String> =
-        Store.str(c, "rai", "").split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        Store.str(c, "gro", "").split(",")
+            .map { it.trim().lowercase().replace('’', '\'').replace('ʼ', '\'') }
+            .filter { it.isNotEmpty() }
+
+    /** Вибрано район (зі списку) або вказано громаду. */
+    fun hasDistrict(c: Context): Boolean =
+        Store.str(c, "rai_name", "").isNotEmpty() || districtWords(c).isNotEmpty()
+
+    /** Чи стосується текст сповіщення вибраного району або громади. */
+    fun districtMatch(c: Context, text: String): Boolean {
+        val name = Store.str(c, "rai_name", "")
+        if (name.isNotEmpty() && Raions.matches(name, text)) return true
+        return districtWords(c).any { text.contains(it) }
+    }
 
     fun set(c: Context, v: Boolean) {
         val was = Store.alert(c)
@@ -41,7 +58,7 @@ object Poller {
     fun token(c: Context): String = Store.str(c, "token", "").trim()
 
     /** Опитування увімкнене: є токен і перемикач «перевіряти раз на хвилину». */
-    fun enabled(c: Context): Boolean = token(c).isNotEmpty() && Store.str(c, "poll", "1") == "1"
+    fun enabled(c: Context): Boolean = false // перевірка через API без токена не використовується
 
     private fun fail(c: Context, msg: String): Boolean {
         Store.setStr(c, "poll_err", msg)
@@ -110,13 +127,10 @@ object Poller {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+    /** Раз на кілька хвилин перевіряє, що читання сповіщень живе (токен не потрібен). */
     fun schedule(c: Context) {
         val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        if (!enabled(c)) {
-            am.cancel(pi(c))
-            return
-        }
-        val at = System.currentTimeMillis() + 60_000L
+        val at = System.currentTimeMillis() + 5 * 60_000L
         try {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi(c))
         } catch (e: SecurityException) {
@@ -128,15 +142,71 @@ object Poller {
 class PollReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
         val app = c.applicationContext
-        val pr = goAsync()
-        Thread {
-            try {
-                Poller.pollNow(app)
-            } catch (e: Exception) {
-            } finally {
-                Poller.schedule(app)
-                pr.finish()
+        try {
+            val granted = Settings.Secure.getString(app.contentResolver, "enabled_notification_listeners")
+                ?.contains(app.packageName) == true
+            if (granted && !AlertListener.connected) {
+                NotificationListenerService.requestRebind(ComponentName(app, AlertListener::class.java))
             }
-        }.start()
+        } catch (e: Exception) {
+        }
+        Poller.schedule(app)
+    }
+}
+
+/** Райони України (після реформи 2020) за областями; порядок збігається з Regions.names. */
+object Raions {
+    private val data = arrayOf(
+        "",
+        "Вінницький,Гайсинський,Жмеринський,Могилів-Подільський,Тульчинський,Хмільницький",
+        "Володимирський,Камінь-Каширський,Ковельський,Луцький",
+        "Дніпровський,Кам'янський,Криворізький,Нікопольський,Павлоградський,Самарівський,Синельниківський",
+        "Бахмутський,Волноваський,Горлівський,Донецький,Кальміуський,Краматорський,Маріупольський,Покровський",
+        "Бердичівський,Житомирський,Коростенський,Новоград-Волинський",
+        "Берегівський,Мукачівський,Рахівський,Тячівський,Ужгородський,Хустський",
+        "Бердянський,Василівський,Запорізький,Мелітопольський,Пологівський",
+        "Верховинський,Івано-Франківський,Калуський,Коломийський,Косівський,Надвірнянський",
+        "Білоцерківський,Бориспільський,Броварський,Бучанський,Вишгородський,Обухівський,Фастівський",
+        "",
+        "Голованівський,Кропивницький,Новоукраїнський,Олександрійський",
+        "Алчевський,Довжанський,Луганський,Ровеньківський,Свердловський,Сєвєродонецький,Старобільський,Щастинський",
+        "Дрогобицький,Золочівський,Львівський,Самбірський,Стрийський,Шептицький/Червоноградський,Яворівський",
+        "Баштанський,Вознесенський,Миколаївський,Первомайський",
+        "Березівський,Білгород-Дністровський,Болградський,Ізмаїльський,Одеський,Подільський,Роздільнянський",
+        "Кременчуцький,Лубенський,Миргородський,Полтавський",
+        "Вараський,Дубенський,Рівненський,Сарненський",
+        "Конотопський,Охтирський,Роменський,Сумський,Шосткинський",
+        "Кременецький,Тернопільський,Чортківський",
+        "Берестинський/Красноградський,Богодухівський,Ізюмський,Куп'янський,Лозівський,Харківський,Чугуївський",
+        "Бериславський,Генічеський,Каховський,Скадовський,Херсонський",
+        "Кам'янець-Подільський,Хмельницький,Шепетівський",
+        "Звенигородський,Золотоніський,Уманський,Черкаський",
+        "Вижницький,Дністровський,Чернівецький",
+        "Корюківський,Ніжинський,Новгород-Сіверський,Прилуцький,Чернігівський",
+        ""
+    )
+
+    /** Назви районів для меню (номер області — як у Regions.names). */
+    fun names(obl: Int): List<String> {
+        if (obl <= 0 || obl >= data.size || data[obl].isEmpty()) return emptyList()
+        return data[obl].split(",").map { it.replace("/", " / ") + " район" }
+    }
+
+    private fun stems(alt: String): List<String> {
+        var u = alt.trim().lowercase().replace('’', '\'').replace('ʼ', '\'')
+        if (u.endsWith("ий") || u.endsWith("ій")) u = u.dropLast(2)
+        val ru = u.replace("ськ", "ск").replace("і", "и").replace("ї", "и")
+        return if (ru == u) listOf(u) else listOf(u, ru)
+    }
+
+    /** Чи згадано цей район у тексті (назва + слово «район», у будь-якому відмінку). */
+    fun matches(name: String, text: String): Boolean {
+        val base = name.removeSuffix(" район")
+        for (alt in base.split("/")) {
+            for (st in stems(alt)) {
+                if (Regex(Regex.escape(st) + "[а-яіїєґ']{0,4}\\s+(район|р-н)").containsMatchIn(text)) return true
+            }
+        }
+        return false
     }
 }

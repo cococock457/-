@@ -510,29 +510,57 @@ class MainActivity : Activity() {
         spBox.background = shape(cField, 14)
         spBox.setPadding(dp(6), 0, dp(6), 0)
         val sp = Spinner(this)
+        spBox.addView(sp, LinearLayout.LayoutParams(MATCH, WRAP))
+        fc.addView(spBox, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        val rl2 = txt(fc, "Район (тривоги лише цього району)", 12f, cSub)
+        rl2.setPadding(0, dp(12), 0, dp(4))
+        val raBox = LinearLayout(this)
+        raBox.background = shape(cField, 14)
+        raBox.setPadding(dp(6), 0, dp(6), 0)
+        val raSp = Spinner(this)
+        raBox.addView(raSp, LinearLayout.LayoutParams(MATCH, WRAP))
+        fc.addView(raBox, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        fun loadRaions(oblIdx: Int) {
+            val items = ArrayList<String>()
+            items.add("Усі райони")
+            items.addAll(Raions.names(oblIdx))
+            raSp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
+            val pos = items.indexOf(Store.str(this, "rai_name", ""))
+            raSp.setSelection(if (pos >= 0) pos else 0)
+        }
+        raSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val name = if (position == 0) "" else (parent?.getItemAtPosition(position)?.toString() ?: "")
+                Store.setStr(this@MainActivity, "rai_name", name)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
         sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, Regions.names)
         sp.setSelection(Store.str(this, "obl", "0").toIntOrNull() ?: 0)
         sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val prev = Store.str(this@MainActivity, "obl", "0")
                 Store.setStr(this@MainActivity, "obl", position.toString())
+                if (position.toString() != prev) Store.setStr(this@MainActivity, "rai_name", "")
+                loadRaions(position)
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
-        spBox.addView(sp, LinearLayout.LayoutParams(MATCH, WRAP))
-        fc.addView(spBox, LinearLayout.LayoutParams(MATCH, WRAP))
+        loadRaions(Store.str(this, "obl", "0").toIntOrNull() ?: 0)
 
-        val fRai = field(fc, "Район або громада (слова через кому, необов’язково)", "rai", "")
+        val fGro = field(fc, "Громада (назва, необов’язково)", "gro", "")
         val fApp = field(fc, "Назва застосунку тривог (частина назви)", "app", "тривог")
         val fStart = field(fc, "Слова початку тривоги (через кому)", "start", "повітряна тривога,воздушная тревога")
         val fEnd = field(fc, "Слова відбою (через кому)", "end", "відбій,отбой")
         pill(fc, "Зберегти", true) {
-            Store.setStr(this, "rai", fRai.text.toString())
+            Store.setStr(this, "gro", fGro.text.toString())
             Store.setStr(this, "app", fApp.text.toString())
             Store.setStr(this, "start", fStart.text.toString())
             Store.setStr(this, "end", fEnd.text.toString())
             Toast.makeText(this, "Збережено", Toast.LENGTH_SHORT).show()
-            val app = applicationContext
-            Thread { Poller.pollNow(app) }.start()
             refresh()
         }
 
@@ -748,18 +776,8 @@ class MainActivity : Activity() {
         d.window?.setLayout((resources.displayMetrics.widthPixels * 0.88).toInt(), WRAP)
     }
 
-    private fun pollText(): String {
-        if (Poller.token(this).isEmpty()) return "Джерело: сповіщення іншого застосунку (токен API не вказано)"
-        if (Store.str(this, "poll", "1") != "1") return "Перевірка через API вимкнена"
-        val err = Store.str(this, "poll_err", "")
-        val ok = Store.str(this, "poll_ok", "0").toLongOrNull() ?: 0L
-        val okTxt = if (ok > 0L) {
-            "остання успішна перевірка о " + SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(ok))
-        } else {
-            "успішних перевірок ще не було"
-        }
-        return if (err.isNotEmpty()) "API: $err; $okTxt" else "API alerts.in.ua: $okTxt"
-    }
+    private fun pollText(): String =
+        "Тривога: миттєво зі сповіщень застосунку тривог (токен не потрібен)"
 
     private fun refresh() {
         if (!::heroTime.isInitialized) return
@@ -944,43 +962,6 @@ class MainActivity : Activity() {
         }
         styleSnooze()
         sn.addView(snRow, LinearLayout.LayoutParams(MATCH, WRAP))
-
-        // перевірка тривоги раз на хвилину
-        val pc = card(root)
-        txt(pc, "📡  Перевірка тривоги", 16f, cText, true)
-        val pd = txt(
-            pc,
-            "Раз на хвилину перевіряє тривогу через alerts.in.ua, щоб стан був точним, навіть якщо сповіщення не прийшло. Потрібен токен: заявка на alerts.in.ua/api-request.",
-            12f, cSub
-        )
-        pd.setPadding(0, dp(6), 0, dp(6))
-        val ps = Switch(this)
-        ps.text = "Перевіряти раз на хвилину"
-        ps.textSize = 15f
-        ps.setTextColor(cText)
-        tintSwitch(ps, cAcc, cSub, a(cAcc, 110), a(cSub, 70))
-        ps.isChecked = Store.str(this, "poll", "1") == "1"
-        ps.setOnCheckedChangeListener { _, on ->
-            Store.setStr(this, "poll", if (on) "1" else "0")
-            Poller.schedule(this)
-            val app = applicationContext
-            if (on) Thread { Poller.pollNow(app) }.start()
-            refresh()
-        }
-        pc.addView(ps, LinearLayout.LayoutParams(MATCH, WRAP))
-        val fToken = field(pc, "Токен alerts.in.ua", "token", "")
-        pollInfo = txt(pc, pollText(), 12f, cSub)
-        pollInfo.setPadding(0, dp(10), 0, 0)
-        pill(pc, "Зберегти токен і перевірити", true) {
-            Store.setStr(this, "token", fToken.text.toString().trim())
-            Store.setStr(this, "poll_err", "")
-            Store.setStr(this, "poll_ok", "0")
-            Poller.schedule(this)
-            Toast.makeText(this, "Збережено, перевіряю…", Toast.LENGTH_SHORT).show()
-            val app = applicationContext
-            Thread { Poller.pollNow(app) }.start()
-            refresh()
-        }
 
         // мелодія
         val tone = card(root)

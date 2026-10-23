@@ -207,6 +207,7 @@ class AlertListener : NotificationListenerService() {
         ex.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.forEach { parts.add(it) }
         // Нерозривні/подвійні пробіли ламали збіг фраз на кшталт «повітряна тривога»
         val text = parts.joinToString(" ").lowercase().replace(Regex("[\\s\\u00A0]+"), " ")
+            .replace('’', '\'').replace('ʼ', '\'')
 
         Store.setStr(c, "last", label + ": " + text)
 
@@ -220,14 +221,17 @@ class AlertListener : NotificationListenerService() {
         }
     }
 
-    // Если выбран регион или районы/громады, считаем только уведомления, где они упомянуты.
+    // Якщо вибрано область, район або громаду, рахуємо лише сповіщення, де вони згадані.
     private fun regionOk(c: Context, text: String): Boolean {
         val idx = Store.str(c, "obl", "0").toIntOrNull() ?: 0
-        val words = ArrayList<String>()
-        if (idx > 0 && idx < Regions.stems.size) words.addAll(Regions.stems[idx].split(","))
-        words.addAll(Store.str(c, "rai", "").split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() })
-        if (words.isEmpty()) return true
-        return words.any { text.contains(it) }
+        val obl = if (idx > 0 && idx < Regions.stems.size) Regions.stems[idx].split(",") else emptyList()
+        if (Alerts.hasDistrict(c)) {
+            if (Alerts.districtMatch(c, text)) return true
+            // тривога або відбій на всю область (без згадки районів і громад) теж стосується нас
+            return obl.isNotEmpty() && obl.any { text.contains(it) } &&
+                !text.contains("район") && !text.contains("р-н") && !text.contains("громад")
+        }
+        return obl.isEmpty() || obl.any { text.contains(it) }
     }
 
     private fun onEnd(c: Context) {
